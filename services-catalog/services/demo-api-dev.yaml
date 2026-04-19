@@ -1,0 +1,8 @@
+name: demo-api
+env: dev
+branch: dev
+cluster: https://kubernetes.default.svc
+type: api
+owner: platform
+tier: T1
+repo: https://github.com/rebellions-sw/rbcn-demo-api-manifests.git

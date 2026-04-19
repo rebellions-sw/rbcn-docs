@@ -1,0 +1,8 @@
+name: demo-nextjs
+env: dev
+branch: dev
+cluster: https://kubernetes.default.svc
+type: web
+owner: platform
+tier: T1
+repo: https://github.com/rebellions-sw/rbcn-demo-nextjs-manifests.git
