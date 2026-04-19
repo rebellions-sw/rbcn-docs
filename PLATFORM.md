@@ -283,9 +283,20 @@ make demo
 
 | 라벨 | 종류 | 갯수 | 용도 |
 |------|------|------|------|
-| `[self-hosted, rebel-k8s-runner]` | ARC scale set (k8s pods) | 8+ (auto-scale) | **표준** — 모든 reusable workflow default |
-| `[self-hosted, rbcn]` | VM (rbcn-ci-runner-01) | 1 | docker daemon 필요한 무거운 빌드 (override) |
+| `[self-hosted, rbcn]` | VM (rbcn-ci-runner-01, Ubuntu 24.04 + docker 29.x) | 1 | **이미지 빌드 표준** — `reusable-build.yaml`의 build job default |
+| `[self-hosted, rebel-k8s-runner]` | ARC scale set (k8s pods, ephemeral) | 8+ (auto-scale) | **lightweight 작업 표준** — manifest validate / promote / dev tag bump |
 | `[self-hosted, X64, …]` | 기타 (gpu2, atom, udc 등) | 240+ | rebel-sw 다른 팀 전용 (사용 금지) |
+
+**왜 빌드만 VM 이고 나머지는 ARC 인가?**
+- ARC pod 는 **daemonless** (docker 없음, kaniko 도 root 권한 부족) → 이미지 빌드 불가.
+- VM (`rbcn-ci-runner-01`) 은 docker daemon + buildx 가 있어 **registry-cache 기반 빌드** 가능.
+- bump-dev-manifest 같은 가벼운 git/yq 작업은 ARC 가 더 빠르고 자동 스케일.
+
+**End-to-end 검증 결과 (2026-04-19, example-payments):**
+- 14 build steps (`docker version` → `docker buildx` → `docker login` → `docker buildx build --push` → `syft SBOM` → `upload-artifact` → `trivy scan` → `cosign install` → `cosign sign`) **all green**
+- 9 bump-dev-manifest steps (`checkout manifests` → `install yq` → `kustomize image newTag bump` → `commit & push`) **all green**
+- 빌드: rbcn VM, manifest bump: ARC scale set (자동 분배 OK)
+- 평균 build time: ~70s (registry cache hit 시), cold ~2-3min
 
 ### 6.2 Org GitHub Secrets (rebellions-sw, visibility=all)
 
@@ -336,11 +347,13 @@ done
 | 카테고리 | 위치 |
 |---|---|
 | 부트스트랩 (이 문서) | `/opt/rbcn-docs/PLATFORM.md` ← **여기** |
+| **CI/CD E2E 검증 (최신)** | `/opt/rbcn-docs/cicd/e2e-verification-2026-04-19.md` |
 | 서비스 카탈로그 | `/opt/rbcn-docs/services/INDEX.md` |
 | Runbook | `/opt/rbcn-docs/runbooks/INDEX.md` |
 | DR Runbook | `/opt/rbcn-docs/dr/INDEX.md` |
 | RTO/RPO | `/opt/rbcn-docs/dr/rto-rpo.md` |
 | Postmortem 템플릿 | `/opt/rbcn-docs/postmortems/TEMPLATE.md` |
+| **ArgoCD ApplicationSet timeout (P3)** | `/opt/rbcn-docs/postmortems/2026/2026-04-19-appset-controller-api-timeout.md` |
 | 개발자 온보딩 | `/opt/rbcn-docs/dev-onboarding.md` |
 | 변경 요청 (Change Request) | `/opt/rbcn-docs/change-requests/` |
 | MkDocs 사이트 | `https://docs.infra.rblnconnect.ai` (또는 `mkdocs serve`) |
