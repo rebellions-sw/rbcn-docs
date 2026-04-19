@@ -32,14 +32,24 @@ GitHub > Settings > Developer settings > Personal Access Tokens (Classic)
 
 ### 1.2 Vault 에 저장
 
-```bash
-vault kv put secret/github \
-    token=<NEW-PAT> \
-    username=rbcn-bot \
-    webhook_secret=<existing-webhook-secret>
-```
+> ⚠️ 아래 코드의 `NEW_PAT` 와 기존 webhook 값은 **본인이 미리 변수에 넣고** 실행해야 합니다.
 
-(`webhook_secret` 은 기존 값 유지. `vault kv get secret/github` 으로 미리 확인.)
+```bash
+# 1) 기존 webhook_secret 값을 보존
+EXISTING_WEBHOOK=$(vault kv get -field=webhook_secret secret/github)
+
+# 2) 새 PAT 를 환경변수로 (절대 git/log 에 남지 않게)
+read -s -p "Paste new PAT (visible 안됨): " NEW_PAT; echo
+
+# 3) 한번에 갱신 (token + 기존 username + 기존 webhook)
+vault kv put secret/github \
+    token="$NEW_PAT" \
+    username=rbcn-bot \
+    webhook_secret="$EXISTING_WEBHOOK"
+
+# 4) 변수 즉시 unset
+unset NEW_PAT
+```
 
 ### 1.3 GitHub Org Secret + ArgoCD repo-creds 일괄 sync
 
@@ -77,9 +87,11 @@ rbcn sync example-payments-dev
 ## 2. Harbor 자격증명 회전
 
 ```bash
-# 1) Harbor UI > Administration > Users > rbcn-bot > 비밀번호 변경
+# 1) Harbor UI > Administration > Users > rbcn-bot > 비밀번호 변경 (수동)
 # 2) Vault 업데이트
-vault kv put secret/harbor/admin username=rbcn-bot password=<new-password>
+read -s -p "Paste new Harbor password: " NEW_HPW; echo
+vault kv put secret/harbor/admin username=rbcn-bot password="$NEW_HPW"
+unset NEW_HPW
 # 3) GitHub org secret + cluster pull secret sync
 rbcn secret sync-gh
 # 4) 모든 ns 의 imagePullSecret refresh (Kyverno policy 자동, 1분 이내)
@@ -92,20 +104,27 @@ rbcn secret sync-gh
 서명된 이미지를 깨지 않으려면 신중히. 보통 **새 키로 새 이미지부터 서명** + **기존 키는 retire** 패턴:
 
 ```bash
-# 1) 새 키 페어 생성
-COSIGN_PASSWORD=<new-pwd> cosign generate-key-pair --output-key-prefix=cosign-2027
+# 1) 새 password (잘 보관)
+read -s -p "New cosign password: " NEW_PWD; echo
 
-# 2) Vault 에 저장
-vault kv put secret/cosign \
-    key="$(cat cosign-2027.key)" \
-    password=<new-pwd> \
-    pub="$(cat cosign-2027.pub)"
+# 2) 새 키 페어 생성 (cosign-YYYY 식)
+PREFIX="cosign-$(date +%Y)"
+COSIGN_PASSWORD="$NEW_PWD" cosign generate-key-pair --output-key-prefix="$PREFIX"
 
-# 3) 새 키로 GH org secret sync
+# 3) Vault 에 저장
+vault kv put secret/cosign/signing \
+    private_key="$(cat ${PREFIX}.key)" \
+    password="$NEW_PWD" \
+    public_key="$(cat ${PREFIX}.pub)"
+unset NEW_PWD
+# 로컬 key file 즉시 삭제 (vault 가 SoT)
+shred -u ${PREFIX}.key ${PREFIX}.pub
+
+# 4) 새 키로 GH org secret sync
 rbcn secret sync-gh
 
-# 4) cluster 의 cosign verifier policy 에 새 pub 키 추가 (옛 키도 당분간 유지)
-kubectl edit policy cosign-verify -n kyverno
+# 5) cluster 의 cosign verifier policy 에 새 pub 키 추가 (옛 키도 6개월간 유지)
+kubectl edit clusterpolicy cosign-verify -n kyverno
 ```
 
 옛 이미지는 옛 키로, 새 이미지는 새 키로 verify 가능. 6개월 후 옛 키 제거.

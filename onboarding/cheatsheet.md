@@ -2,6 +2,9 @@
 
 > 인쇄해서 모니터 옆에 붙여두세요.
 > 모든 명령은 `workspace VM` 위에서 (`ssh rbcn@<workspace-vm>`).
+>
+> **표기 규칙**: `<...>` 는 본인 값으로 교체해야 하는 placeholder.
+> 그대로 복붙하면 shell 이 redirect 로 해석해 깨집니다. 예: `<svc>` → `payments`.
 
 ---
 
@@ -40,7 +43,8 @@ rbcn problems                     # CrashLoop / Pending / Failed 모두
 rbcn pods [ns]                    # pod 목록
 rbcn logs <pod> [-f]              # 로그 (자동 추론 OK: rbcn logs <svc-prefix>)
 rbcn exec <pod>                   # sh exec
-rbcn pf <svc> <port>              # localhost:port → svc:port
+rbcn pf <svc> <port|local:remote> # 예: rbcn pf payments 8080  →  localhost:8080 ↔ svc:8080
+                                  #     rbcn pf payments 9090:8080 → localhost:9090 ↔ svc:8080
 rbcn restart <deploy>             # rollout restart
 rbcn events [ns]                  # warning events
 rbcn top                          # CPU/Mem

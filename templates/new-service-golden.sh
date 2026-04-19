@@ -100,10 +100,10 @@ EOF
         cat > "$SVCDIR/go.mod" <<EOF
 module github.com/$ORG/$SVC
 
-go 1.25
+go 1.22
 EOF
         cat > "$SVCDIR/Dockerfile" <<'EOF'
-FROM golang:1.25-alpine AS build
+FROM golang:1.22-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 RUN go mod download
@@ -137,7 +137,7 @@ EOF
 { "name": "$SVC", "version": "0.1.0", "main": "index.js", "scripts": { "start": "node index.js" } }
 EOF
         cat > "$SVCDIR/Dockerfile" <<'EOF'
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 COPY package.json ./
 RUN npm install --production
@@ -165,7 +165,7 @@ class H(BaseHTTPRequestHandler):
 HTTPServer(("",int(os.getenv("PORT","8080"))), H).serve_forever()
 EOF
         cat > "$SVCDIR/Dockerfile" <<'EOF'
-FROM python:3.12-alpine
+FROM python:3.13-alpine
 WORKDIR /app
 COPY main.py .
 EXPOSE 8080
@@ -225,7 +225,7 @@ permissions:
   packages: write
 jobs:
   build:
-    runs-on: [self-hosted, rebel-k8s-runner]
+    runs-on: [self-hosted, rbcn-org]
     steps:
       - uses: actions/checkout@v4
       - name: tag
@@ -514,7 +514,7 @@ on:
 permissions: { contents: write, pull-requests: write }
 jobs:
   promote:
-    runs-on: [self-hosted, rebel-k8s-runner]
+    runs-on: [self-hosted, rbcn-org]
     steps:
       - uses: actions/checkout@v4
       - run: |

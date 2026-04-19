@@ -54,23 +54,37 @@ sudo crictl rmp -f $POD_ID
 ### etcd 멤버 1대 영구 손실 → 멤버 제거 + 재가입
 
 ```bash
-# 1) 살아있는 멤버에서 죽은 멤버 ID 확인 후 제거
-ETCD_POD=etcd-rbcn-prod-k8scp-01
+# 0) 변수 (본인 환경에 맞게)
+ETCD_POD=etcd-rbcn-prod-k8scp-01     # 살아있는 etcd pod
+DEAD_NODE=rbcn-prod-k8scp-03         # 죽은 노드 hostname
+NEW_NODE=$DEAD_NODE                  # 같은 노드 재설치면 동일
+
+# 1) 살아있는 멤버에서 죽은 멤버 ID 확인
 KUBECONFIG=/root/.kube/config-prod kubectl -n kube-system exec ${ETCD_POD} -- \
   etcdctl --endpoints=https://127.0.0.1:2379 \
   --cacert=/etc/kubernetes/pki/etcd/ca.crt \
   --cert=/etc/kubernetes/pki/etcd/server.crt \
   --key=/etc/kubernetes/pki/etcd/server.key \
-  member remove <DEAD_MEMBER_ID>
+  member list
+# 출력에서 DEAD_NODE 의 hex ID 복사
+DEAD_MEMBER_ID="<위 출력의 hex>"     # ← 본인이 채워야 함
 
-# 2) 새 노드 (또는 재설치한 동일 노드) 에서 kubeadm reset
-ssh rbcn@<dead_node> "sudo kubeadm reset --force"
-ssh rbcn@<dead_node> "sudo rm -rf /etc/kubernetes /var/lib/etcd"
+# 2) 멤버 제거
+KUBECONFIG=/root/.kube/config-prod kubectl -n kube-system exec ${ETCD_POD} -- \
+  etcdctl --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/server.crt \
+  --key=/etc/kubernetes/pki/etcd/server.key \
+  member remove ${DEAD_MEMBER_ID}
 
-# 3) join (workspace VM 에서 토큰 생성)
+# 3) 새 노드 (또는 재설치한 동일 노드) 에서 kubeadm reset
+ssh rbcn@${DEAD_NODE} "sudo kubeadm reset --force"
+ssh rbcn@${DEAD_NODE} "sudo rm -rf /etc/kubernetes /var/lib/etcd"
+
+# 4) join (workspace VM 에서 토큰 생성)
 NEW_TOKEN=$(KUBECONFIG=/root/.kube/config-prod kubeadm token create --print-join-command)
 CERT_KEY=$(KUBECONFIG=/root/.kube/config-prod kubeadm init phase upload-certs --upload-certs | tail -1)
-ssh rbcn@<new_node> "sudo ${NEW_TOKEN} --control-plane --certificate-key ${CERT_KEY}"
+ssh rbcn@${NEW_NODE} "sudo ${NEW_TOKEN} --control-plane --certificate-key ${CERT_KEY}"
 ```
 
 ### Cluster 전체 장애 → etcd snapshot restore

@@ -172,7 +172,7 @@ rbcn sync my-first-svc-dev                      # 강제 sync 가 필요하면
 # 4) Kubernetes 에 실제 떴는지
 eval $(rbcn ctx dev)
 kubectl get pods -n my-first-svc -w             # Running 1/1 이 보일 때까지 watch
-rbcn pf my-first-svc 8080                       # localhost:8080 으로 port-forward
+rbcn pf my-first-svc 8080                       # localhost:8080 → svc:8080 (port-forward)
 curl http://localhost:8080/healthz              # → "ok"
 ```
 
@@ -324,7 +324,7 @@ rbcn logs my-first-svc-7d9c-xx -f               # 특정 pod follow
 rbcn exec my-first-svc                          # sh 로 들어감
 
 # 6.5) 임시 port-forward
-rbcn pf my-first-svc 8080                       # localhost:8080 → pod:8080
+rbcn pf my-first-svc 8080                       # localhost:8080 → svc:8080 (port=local:remote 도 가능, 예: 9090:8080)
 
 # 6.6) 메트릭 / 대시보드
 rbcn url grafana                                # Grafana 열기

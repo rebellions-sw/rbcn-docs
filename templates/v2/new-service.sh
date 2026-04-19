@@ -134,10 +134,10 @@ EOF
     cat > "$SVCDIR/go.mod" <<EOF
 module github.com/${ORG}/${NAME}
 
-go 1.25
+go 1.22
 EOF
     cat > "$SVCDIR/Dockerfile" <<'EOF'
-FROM golang:1.25-alpine AS build
+FROM golang:1.22-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 COPY *.go ./
@@ -179,14 +179,14 @@ EOF
 { "compilerOptions": { "target": "ES2022", "module": "commonjs", "outDir": "dist", "strict": true, "esModuleInterop": true } }
 EOF
     cat > "$SVCDIR/Dockerfile" <<'EOF'
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json ./
 RUN npm install
 COPY . .
 RUN npm run build
 
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/node_modules ./node_modules
@@ -217,7 +217,7 @@ uvicorn[standard]==0.30.6
 prometheus-client==0.20.0
 EOF
     cat > "$SVCDIR/Dockerfile" <<'EOF'
-FROM python:3.12-slim
+FROM python:3.13-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -320,6 +320,10 @@ spec:
           ports:
             - containerPort: 8080
               name: http
+          envFrom:
+            - secretRef:
+                name: ${NAME}
+                optional: true
           env:
             - name: BUILD_TAG
               value: "placeholder"
@@ -426,6 +430,24 @@ spec:
       ports: [{ port: 8080, protocol: TCP }]
 EOF
 
+cat > "$MANDIR/base/externalsecret.yaml" <<EOF
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: ${NAME}
+spec:
+  refreshInterval: 30s
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: ${NAME}                       # K8s Secret name (deployment 의 envFrom)
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: services/${NAME}            # secret/services/${NAME} (Vault path)
+EOF
+
 cat > "$MANDIR/base/kustomization.yaml" <<EOF
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -437,6 +459,7 @@ resources:
   - servicemonitor.yaml
   - prometheusrule.yaml
   - networkpolicy.yaml
+  - externalsecret.yaml
 commonLabels:
   app.kubernetes.io/name: ${NAME}
   app.kubernetes.io/managed-by: argocd

@@ -26,9 +26,25 @@
 |---|---|
 | [db-pitr.md](./db-pitr.md) | CloudNative-PG 시점 복구 |
 
+## DR / 검증 (분기)
+
+| File | 주제 |
+|---|---|
+| [gameday.md](./gameday.md) | 분기별 카오스 훈련 (5 시나리오) |
+| [restore-drill.md](./restore-drill.md) | 분기별 백업 restore 검증 |
+
+## 정책 / 표준
+
+| File | 주제 |
+|---|---|
+| [`../STANDARDS.md`](../STANDARDS.md) | 빅테크 대비 gap analysis (분기 갱신) |
+| [`../policies/slo-policy.md`](../policies/slo-policy.md) | Tier 별 SLO + multi-window burn rate |
+| [`../policies/alert-policy.md`](../policies/alert-policy.md) | 알람 등급 + noise budget |
+| [`../policies/maintenance.md`](../policies/maintenance.md) | 유지보수 윈도우 + silence |
+| [`../change-requests/POLICY.md`](../change-requests/POLICY.md) | 환경별 변경 정책 |
+
 ## 관련 문서
 
 - [`../onboarding/troubleshooting.md`](../onboarding/troubleshooting.md) — 신입용 증상별 case-study
 - [`../postmortems/INDEX.md`](../postmortems/INDEX.md) — 과거 사고 분석
 - [`../dr/INDEX.md`](../dr/INDEX.md) — 재해 복구
-- [`../change-requests/POLICY.md`](../change-requests/POLICY.md) — 변경 정책

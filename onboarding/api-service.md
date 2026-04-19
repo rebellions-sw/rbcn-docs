@@ -130,7 +130,7 @@ kubectl get pods -n payments -w
 엔드포인트 호출:
 
 ```bash
-rbcn pf payments 8080                            # localhost:8080 ←→ pod:8080
+rbcn pf payments 8080                            # localhost:8080 ←→ svc:8080
 # (다른 터미널)
 curl http://localhost:8080/healthz               # → ok
 curl http://localhost:8080/charge                # → {"status":"accepted","amount":1000}

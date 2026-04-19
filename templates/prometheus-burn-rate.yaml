@@ -1,0 +1,110 @@
+# Multi-window, Multi-burn-rate SLO alert template
+# 사용: services-catalog 의 svc/env 별 base/prometheusrule.yaml 에 include 또는 override.
+# Google SRE workbook Ch.5 참고.
+# 변수: ${SVC} ${OWNER} ${TIER} ${SLO_AVAIL}  (예: SLO_AVAIL=0.999 for T1)
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ${SVC}-slo-burn-rate
+  labels:
+    owner: ${OWNER}
+    tier: ${TIER}
+    managed-by: rbcn
+spec:
+  groups:
+    - name: ${SVC}-slo
+      interval: 30s
+      rules:
+        # ─── Recording rules: error rate 를 5 windows 에 대해 ───
+        - record: ${SVC}:error_rate:1h
+          expr: |
+            sum(rate(${SVC}_http_requests_total{code=~"5.."}[1h]))
+            /
+            sum(rate(${SVC}_http_requests_total[1h]))
+        - record: ${SVC}:error_rate:6h
+          expr: |
+            sum(rate(${SVC}_http_requests_total{code=~"5.."}[6h]))
+            /
+            sum(rate(${SVC}_http_requests_total[6h]))
+        - record: ${SVC}:error_rate:1d
+          expr: |
+            sum(rate(${SVC}_http_requests_total{code=~"5.."}[1d]))
+            /
+            sum(rate(${SVC}_http_requests_total[1d]))
+        - record: ${SVC}:error_rate:3d
+          expr: |
+            sum(rate(${SVC}_http_requests_total{code=~"5.."}[3d]))
+            /
+            sum(rate(${SVC}_http_requests_total[3d]))
+
+        # ─── Burn rate alerts ───
+        # threshold = (1 - SLO) * burn_rate
+        # T1 (SLO=0.999): err_budget=0.001
+        #   page (fast):  burn 14.4× → err_rate > 0.0144 over 1h
+        #   page (mid):   burn  6×   → err_rate > 0.006  over 6h
+        #   ticket (slow): burn 3×   → err_rate > 0.003  over 1d
+        #   ticket (slow): burn 1×   → err_rate > 0.001  over 3d
+        - alert: ${SVC}_ErrorBudgetBurn_Page_Fast
+          expr: ${SVC}:error_rate:1h > (1 - ${SLO_AVAIL}) * 14.4
+          for: 2m
+          labels:
+            severity: page
+            owner: ${OWNER}
+            tier: ${TIER}
+            service: ${SVC}
+            slo: error-budget-burn
+          annotations:
+            summary: "${SVC} burning error budget 14.4× (1h window)"
+            description: "1h error rate {{ $value | humanizePercentage }} → 한 달 budget 의 2% 소진. 즉시 대응."
+            runbook_url: "https://github.com/rebellions-sw/rbcn-docs/blob/main/runbooks/oncall.md"
+
+        - alert: ${SVC}_ErrorBudgetBurn_Page_Mid
+          expr: ${SVC}:error_rate:6h > (1 - ${SLO_AVAIL}) * 6
+          for: 15m
+          labels:
+            severity: page
+            owner: ${OWNER}
+            tier: ${TIER}
+            service: ${SVC}
+          annotations:
+            summary: "${SVC} burning error budget 6× (6h window)"
+            runbook_url: "https://github.com/rebellions-sw/rbcn-docs/blob/main/runbooks/oncall.md"
+
+        - alert: ${SVC}_ErrorBudgetBurn_Ticket_Slow
+          expr: ${SVC}:error_rate:1d > (1 - ${SLO_AVAIL}) * 3
+          for: 1h
+          labels:
+            severity: ticket
+            owner: ${OWNER}
+            tier: ${TIER}
+            service: ${SVC}
+          annotations:
+            summary: "${SVC} burning error budget 3× (1d window) — investigate today"
+
+        - alert: ${SVC}_ErrorBudgetBurn_Ticket_Trend
+          expr: ${SVC}:error_rate:3d > (1 - ${SLO_AVAIL}) * 1
+          for: 6h
+          labels:
+            severity: ticket
+            owner: ${OWNER}
+            tier: ${TIER}
+            service: ${SVC}
+          annotations:
+            summary: "${SVC} 3d error rate trending bad"
+
+        # ─── Latency SLO (별도) ───
+        - alert: ${SVC}_LatencyP99_HighBurn
+          expr: |
+            histogram_quantile(0.99,
+              sum(rate(${SVC}_http_request_duration_seconds_bucket[5m])) by (le)
+            ) > 1.0
+          for: 10m
+          labels:
+            severity: page
+            owner: ${OWNER}
+            tier: ${TIER}
+            service: ${SVC}
+          annotations:
+            summary: "${SVC} P99 latency > 1s (10m)"
+            runbook_url: "https://github.com/rebellions-sw/rbcn-docs/blob/main/runbooks/oncall.md"

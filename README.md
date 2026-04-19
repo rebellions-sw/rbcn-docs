@@ -12,7 +12,9 @@ Welcome to the RBCN infrastructure documentation site.
 
 ### 운영자 / 심화
 - **[PLATFORM.md](./PLATFORM.md)** — 운영자 SOT (한 페이지에 모든 시스템)
-- **[Runbooks](./runbooks/INDEX.md)** — 운영 runbook
+- **[STANDARDS.md](./STANDARDS.md)** — 빅테크 대비 gap analysis (분기 갱신)
+- **[Runbooks](./runbooks/INDEX.md)** — 운영 runbook (oncall, gameday, restore-drill, vault-unseal, db-pitr, secret-rotation)
+- **[Policies](./policies/)** — SLO / Alert / Maintenance 정책
 - **[Postmortems](./postmortems/INDEX.md)** — 사고 분석
 - **[DR Runbook](./dr/INDEX.md)** — 재해 복구
 - **[Service Catalog](./services/INDEX.md)** — 서비스 목록

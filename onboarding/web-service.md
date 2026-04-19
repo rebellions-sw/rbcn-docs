@@ -29,7 +29,7 @@ rbcn new portal --type=web --lang=node --owner=frontend --tier=T1
 
 `--type=web` 일 때 [`api-service.md`](./api-service.md) 와 다른 점:
 - `index.ts` 대신 **Next.js 14 skeleton** (`app/`, `pages/`, `next.config.js`)
-- `Dockerfile` 이 `node:20-alpine` build 후 `node:20-slim` runtime + `next start`
+- `Dockerfile` 이 `node:22-alpine` build 후 `node:22-slim` runtime + `next start`
 - `base/deployment.yaml` 의 port 가 `3000` (Next.js 기본)
 - `base/ingress.yaml` 이 hostname `portal.<env>.infra.rblnconnect.ai`
 - `base/configmap.yaml` 에 `NEXT_PUBLIC_API_URL` 등 환경변수 자동
@@ -52,18 +52,18 @@ cat app/api/healthz/route.ts                     # /api/healthz (probe 용)
 자동 생성된 `Dockerfile` (Next.js standalone output 활용):
 
 ```dockerfile
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-FROM node:20-slim
+FROM node:22-slim
 WORKDIR /app
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
@@ -112,7 +112,7 @@ build job 의 핵심 단계 (api 와 동일하지만 Dockerfile build 가 길어
 |---|---|
 | docker buildx build (npm ci + next build, no cache) | 90~150s |
 | docker buildx build (cache hit) | 20~40s |
-| trivy scan (node:20 base) | 10s |
+| trivy scan (node:22 base) | 10s |
 | cosign sign | 5s |
 
 > 첫 빌드는 cold cache 라 느립니다. 두 번째부터 buildx registry cache 가 작동.

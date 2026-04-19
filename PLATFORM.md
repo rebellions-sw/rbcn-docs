@@ -4,10 +4,13 @@
 
 > **신입 개발자**: 먼저 [`ONBOARDING.md`](./ONBOARDING.md) 부터 (Day-0 환경 → Day-1 첫 PR, 90분).
 > **숙련 개발자**: [`DEVELOPER.md`](./DEVELOPER.md) (신규 서비스 1 명령) 또는 [`onboarding/cheatsheet.md`](./onboarding/cheatsheet.md).
-> **운영자**: 이 페이지가 진입점.
+> **운영자**: 이 페이지가 진입점. 분기 1회 [`STANDARDS.md`](./STANDARDS.md) 로 빅테크 gap 점검.
 
 > 서비스 종류별 step-by-step (각 10~40분):
 > [API](./onboarding/api-service.md) · [Web](./onboarding/web-service.md) · [MFE](./onboarding/mfe-service.md) · [DB](./onboarding/db-service.md) · [Cache](./onboarding/cache-service.md)
+>
+> 정책 / 분기 활동:
+> [SLO Policy](./policies/slo-policy.md) · [Alert Policy](./policies/alert-policy.md) · [Maintenance](./policies/maintenance.md) · [GameDay](./runbooks/gameday.md) · [Restore Drill](./runbooks/restore-drill.md)
 
 ---
 

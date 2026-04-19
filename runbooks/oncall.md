@@ -29,19 +29,22 @@
 ## 2. 첫 대응 (모든 P1 공통)
 
 ```bash
-# 1. 누구든 ack (PagerDuty)
-# 2. #incident-<date> 채널 만들기
-/incident new <한줄 제목>
+# (변수로 한번 정의 → 그대로 복붙 가능)
+SVC=payments        # 영향 받는 서비스 (rbcn problems 출력에서)
+NS=payments         # 보통 동일
+
+# 1. 누구든 ack (PagerDuty 모바일 또는 https://rebellions.pagerduty.com)
+# 2. Slack 에서 #incident 채널 새로: '/incident new <한줄 제목>' 입력
 
 # 3. 즉시 진단
 rbcn problems
-rbcn diag <impacted-svc>
+rbcn diag $SVC
 
 # 4. 영향 범위 확인 (Grafana)
-rbcn slo <svc>      # 5xx, latency, error budget burn rate
+rbcn slo $SVC                    # 5xx, latency, error budget burn rate
 
 # 5. 변경 사항 점검 (최근 30분 deploy)
-gh run list -R rebellions-sw/<svc> -L 5
+gh run list -R rebellions-sw/$SVC -L 5
 kubectl get events -A --sort-by='.lastTimestamp' | tail -30
 ```
 
@@ -64,14 +67,19 @@ kubectl get events -A --sort-by='.lastTimestamp' | tail -30
 ## 4. 롤백 (가장 빠른 안전장치)
 
 ```bash
-rbcn rollback <svc>                  # Argo Rollouts 직전 stable revision
+SVC=payments
+NS=payments
+rbcn rollback $SVC                  # Argo Rollouts 직전 stable revision
 # 또는 specific revision 으로
-kubectl argo rollouts undo <svc> -n <ns>
+kubectl argo rollouts undo $SVC -n $NS
 ```
 
-배포 PR 자체를 revert 해야 한다면:
+배포 PR 자체를 revert 해야 한다면 (PR 번호는 GitHub UI 에서 확인):
+
 ```bash
-gh pr revert <pr-num> -R rebellions-sw/<svc>-manifests
+SVC=payments
+PR_NUM=42      # ← 본인이 채워야 함
+gh pr revert $PR_NUM -R rebellions-sw/$SVC-manifests
 ```
 
 ---

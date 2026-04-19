@@ -2,15 +2,25 @@
 
 > 대상: 신입 ~ 경험자 모두.
 > "이 증상 보면 → 이 명령 → 99% 원인 파악" 의 흐름으로 정리.
-> 모든 명령은 `workspace VM` 위에서 (`ssh rbcn@<workspace-vm>`).
+> 모든 명령은 `workspace VM` 위에서 (`ssh rbcn@<workspace-vm-ip>`).
+>
+> **표기 규칙**: 코드블록의 `<...>` 는 placeholder. 그대로 복붙하면 깨집니다.
+> 예: `<svc>` → `payments`, `<ns>` → `payments`, `<pod>` → 실제 pod 이름.
+> 명령을 길게 따라하기 전에 위에 변수 정의해두면 편합니다:
+>
+> ```bash
+> SVC=payments; NS=payments; POD=$(kubectl get pod -n $NS -l app=$SVC -o name | head -1)
+> ```
 
 ---
 
 ## 0. 1순위: 만능 진단
 
 ```bash
-rbcn diag <svc>          # status + events + logs + 최근 deploy + ingress + pvc 한번에
-rbcn problems            # 모든 cluster 의 모든 namespace 의 비정상 pod
+SVC=payments              # 본인 서비스 이름
+
+rbcn diag $SVC            # status + events + logs + 최근 deploy + ingress + pvc 한번에
+rbcn problems             # 모든 cluster 의 모든 namespace 의 비정상 pod
 ```
 
 이 두 줄이 80% 의 문제 답을 줍니다.
@@ -45,8 +55,12 @@ docker buildx version  # 확인
 **조치**: `harbor.infra.rblnconnect.ai` 로 모든 곳 (Dockerfile, manifests, docs) 통일.
 
 ```bash
+# 잔존 검색
 grep -rln "harbor.rebellions.ai" .
-sed -i 's|harbor.rebellions.ai|harbor.infra.rblnconnect.ai|g' <files>
+
+# 일괄 치환 (위에서 나온 파일들 중 안전한 것만; 본인 repo root 에서)
+grep -rl "harbor.rebellions.ai" --include="*.yaml" --include="Dockerfile" --include="*.md" . \
+  | xargs sed -i 's|harbor.rebellions.ai|harbor.infra.rblnconnect.ai|g'
 ```
 
 ### 1.3 `Trivy CRITICAL` 로 fail
@@ -75,11 +89,16 @@ fatal: could not read Username for 'https://github.com': terminal prompts disabl
 
 **원인**: `MANIFESTS_PAT` org secret 이 placeholder/만료.
 
-**조치**:
+**조치**: 자세한 절차는 [`runbooks/secret-rotation.md`](../runbooks/secret-rotation.md) §1.
+
+요약:
 ```bash
-# 1) 새 PAT 생성 (GitHub > Settings > Developer settings > PAT classic, scope: repo)
-# 2) Vault 업데이트
-vault kv put secret/github token=<new-pat> username=<user> webhook_secret=<existing>
+# 1) GitHub > Settings > Developer settings > PAT classic 에서 새 PAT 발급
+# 2) Vault 갱신 (NEW_PAT 변수에 paste 후 echo 안 보이게)
+read -s -p "Paste new PAT: " NEW_PAT; echo
+EXISTING_WEBHOOK=$(vault kv get -field=webhook_secret secret/github)
+vault kv put secret/github token="$NEW_PAT" username=rbcn-bot webhook_secret="$EXISTING_WEBHOOK"
+unset NEW_PAT
 # 3) GitHub org secret sync (validation 자동)
 rbcn secret sync-gh
 ```
