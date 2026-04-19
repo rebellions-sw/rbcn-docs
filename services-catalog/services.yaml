@@ -36,3 +36,10 @@ services:
     tier: T1
     repo: https://github.com/rebellions-sw/rbcn-demo-db-api-manifests.git
     environments: [dev]
+
+  - name: example-payments
+    type: api
+    owner: platform
+    tier: T2
+    repo: https://github.com/rebellions-sw/example-payments-manifests.git
+    environments: [dev, stage, prod]

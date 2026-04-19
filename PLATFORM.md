@@ -272,12 +272,47 @@ make demo
 
 | 항목 | 영향 | 결정사항 |
 |---|---|---|
-| GitHub PAT 만료 (90일) | CI/CD 중단 | Vault `secret/github` 갱신 + GitHub Actions `secrets` 업데이트 |
+| GitHub PAT 만료 (90일) | CI/CD 중단 | Vault `secret/github` 갱신 + `gh secret set MANIFESTS_PAT --org rebellions-sw` 재실행 |
 | Vault 재밀봉 (재부팅 후) | 모든 secret 접근 불가 | `vault operator unseal` × 3 keys (Vault Operator 가 보관) |
 | BIND zone 변경 | DNS 일관성 | `04_networking_dns` 스크립트로 IaC 화 |
 | Backup VM 디스크 풀 | 백업 실패 | Prometheus alert 자동 (`backup_disk_full > 80%`) |
 | Let's Encrypt 발급 (외부 노출 시) | 공인 cert | `11_cert_tls/08-le-issuer-skeleton.sh` 가 ClusterIssuer 만 준비, 실 발급은 외부 ingress 필요 |
 | 클러스터 인증서 갱신 (kubeadm 1y) | API 서버 다운 | `kubeadm certs renew all` (cron 자동) |
+
+### 6.1 CI / Self-hosted GitHub Actions Runners
+
+| 라벨 | 종류 | 갯수 | 용도 |
+|------|------|------|------|
+| `[self-hosted, rebel-k8s-runner]` | ARC scale set (k8s pods) | 8+ (auto-scale) | **표준** — 모든 reusable workflow default |
+| `[self-hosted, rbcn]` | VM (rbcn-ci-runner-01) | 1 | docker daemon 필요한 무거운 빌드 (override) |
+| `[self-hosted, X64, …]` | 기타 (gpu2, atom, udc 등) | 240+ | rebel-sw 다른 팀 전용 (사용 금지) |
+
+### 6.2 Org GitHub Secrets (rebellions-sw, visibility=all)
+
+| Secret | 용도 | 출처 (Vault) | 갱신 시점 |
+|--------|------|--------------|----------|
+| `HARBOR_USER`         | Harbor registry user (admin/robot)  | `secret/harbor/admin#username` | 비밀번호 회전 시 |
+| `HARBOR_PASS`         | Harbor registry password            | `secret/harbor/admin#password` | 비밀번호 회전 시 |
+| `COSIGN_PRIVATE_KEY`  | 이미지 서명 키                       | `secret/cosign/signing#private_key` | 키 회전 시 |
+| `COSIGN_PASSWORD`     | cosign key passphrase               | `secret/cosign/signing#password` | 키 회전 시 |
+| `MANIFESTS_PAT`       | manifests repo write 가능한 PAT      | `secret/github#token` | 90 일 만료 |
+
+재등록 1-liner:
+
+```bash
+# Vault → GH org secrets sync (모든 5개)
+for k in HARBOR_USER HARBOR_PASS COSIGN_PRIVATE_KEY COSIGN_PASSWORD MANIFESTS_PAT; do
+  echo "(read $k from vault and set via gh secret set ... --org rebellions-sw --visibility all)"
+done
+# 자동화: rbcn secret sync-gh
+```
+
+### 6.3 Org Repos (조직 표준)
+
+| Repo | 용도 |
+|------|------|
+| `rebellions-sw/.github`     | reusable workflows + base-app templates (모든 service repo 가 호출) |
+| `rebellions-sw/rbcn-docs`   | services-catalog, ApplicationSet, runbooks, post-mortems |
 
 ---
 

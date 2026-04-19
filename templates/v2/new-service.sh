@@ -583,15 +583,17 @@ else
   if gh repo view "${ORG}/${NAME}-manifests" >/dev/null 2>&1; then
     red "  exists, skip create"
   else
-    (cd "$MANDIR" && gh repo create "${ORG}/${NAME}-manifests" --private --source=. --remote=origin --push -b dev)
+    (cd "$MANDIR" && gh repo create "${ORG}/${NAME}-manifests" --private --source=. --remote=origin --push)
     (cd "$MANDIR" && git push origin stage prod) || true
+    # default branch 는 init 시점의 'dev' 가 아니라 첫 push 의 branch 가 됨. dev 로 강제.
+    gh api -X PATCH "repos/${ORG}/${NAME}-manifests" -f default_branch=dev >/dev/null 2>&1 || true
   fi
 fi
 
 # ─────────── 4. Service catalog (auto-onboard via ApplicationSet) ───────────
 cyan "[4/9] Catalog onboard  →  $CATALOG"
 if [ "$DRY_RUN" = "true" ]; then
-  red "  DRY RUN — skip catalog modification"
+  red "  DRY RUN — skip catalog modification + regen"
 elif grep -qE "^  - name: ${NAME}$" "$CATALOG" 2>/dev/null; then
   red "  already in catalog"
 else
@@ -605,7 +607,16 @@ else
     repo: https://github.com/${ORG}/${NAME}-manifests.git
     environments: ${ENV_LIST}
 EOF
-  green "  added"
+  green "  added to services.yaml"
+
+  cyan "  → regen per-env files (services-catalog/services/*.yaml)"
+  (cd "$(dirname "$CATALOG")" && bash regen.sh) | sed 's/^/    /'
+
+  cyan "  → commit + push catalog change"
+  (cd "$DOCS" && \
+    git add services-catalog/ && \
+    git -c user.name=rbcn-bot -c user.email=rbcn-bot@rebellions.ai commit -m "feat(catalog): onboard ${NAME} (${TYPE})" 2>&1 | tail -3 && \
+    git push 2>&1 | tail -2) | sed 's/^/    /'
 fi
 
 # ─────────── 5. Vault secret skeleton ───────────

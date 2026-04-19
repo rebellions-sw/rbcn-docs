@@ -1,0 +1,8 @@
+name: example-payments
+env: prod
+branch: prod
+cluster: https://kubernetes.default.svc
+type: api
+owner: platform
+tier: T2
+repo: https://github.com/rebellions-sw/example-payments-manifests.git
