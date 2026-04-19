@@ -35,7 +35,7 @@ on:
       registry:
         required: false
         type: string
-        default: "harbor.rebellions.ai"
+        default: "harbor.infra.rblnconnect.ai"
       registry_project:
         description: "Harbor project (image path = registry/project/service)"
         required: false

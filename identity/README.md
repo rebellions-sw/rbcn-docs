@@ -45,7 +45,7 @@ rbcn user rm alice@rebellions.ai
 | Client ID | redirect | flow | role mapping |
 |-----------|----------|------|--------------|
 | `argocd`   | `https://argocd.dev/api/dex/callback`        | code | groups → argocd_role |
-| `harbor`   | `https://harbor.rebellions.ai/c/oidc/callback`| code | groups → project_role |
+| `harbor`   | `https://harbor.infra.rblnconnect.ai/c/oidc/callback`| code | groups → project_role |
 | `headlamp` | `https://headlamp.dev/oidc-callback`         | code | groups → impersonate_groups |
 | `grafana`  | `https://grafana.dev/login/generic_oauth`    | code | groups → grafana role |
 | `minio`    | `https://minio.dev/oauth_callback`           | code | groups → policies |

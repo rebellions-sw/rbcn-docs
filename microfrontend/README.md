@@ -98,7 +98,7 @@ data:
 
 ```bash
 # remote 의 CI 에서 (reusable-build.yaml 의 옵션)
-npm publish --registry https://harbor.rebellions.ai/repository/npm-internal
+npm publish --registry https://harbor.infra.rblnconnect.ai/repository/npm-internal
 ```
 
 ## 보안

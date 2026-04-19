@@ -232,7 +232,7 @@ esac
 cat > "$SVCDIR/Makefile" <<EOF
 .PHONY: dev build push test
 
-IMG ?= harbor.rebellions.ai/library/${NAME}
+IMG ?= harbor.infra.rblnconnect.ai/library/${NAME}
 TAG ?= dev-\$(shell git rev-parse --short HEAD 2>/dev/null || echo sandbox)
 
 dev:
@@ -270,7 +270,7 @@ kind: Config
 metadata: { name: ${NAME} }
 build:
   artifacts:
-    - image: harbor.rebellions.ai/library/${NAME}
+    - image: harbor.infra.rblnconnect.ai/library/${NAME}
       docker: { dockerfile: Dockerfile }
 deploy:
   kustomize:
@@ -316,7 +316,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: app
-          image: harbor.rebellions.ai/library/${NAME}:placeholder
+          image: harbor.infra.rblnconnect.ai/library/${NAME}:placeholder
           ports:
             - containerPort: 8080
               name: http
@@ -460,7 +460,7 @@ resources:
   - ingress.yaml
   - certificate.yaml
 images:
-  - name: harbor.rebellions.ai/library/${NAME}
+  - name: harbor.infra.rblnconnect.ai/library/${NAME}
     newTag: "0.1.0"
 patches:
   - target: { kind: Deployment, name: ${NAME} }

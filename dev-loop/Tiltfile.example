@@ -9,7 +9,7 @@ k8s_yaml(kustomize('../demo-db-api-manifests/overlays/dev'))
 
 # 작업 중 서비스 (hot reload)
 docker_build_with_restart(
-    'harbor.rebellions.ai/library/my-service',
+    'harbor.infra.rblnconnect.ai/library/my-service',
     '.',
     entrypoint='./app',
     live_update=[

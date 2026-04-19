@@ -37,8 +37,8 @@ nodes:
       - { containerPort: 443, hostPort: 443, protocol: TCP }
 containerdConfigPatches:
   - |
-    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."harbor.rebellions.ai"]
-      endpoint = ["http://harbor.rebellions.ai"]
+    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."harbor.infra.rblnconnect.ai"]
+      endpoint = ["http://harbor.infra.rblnconnect.ai"]
 EOF
 kind create cluster --config /tmp/kind.yaml --name rbcn-dev
 
@@ -86,7 +86,7 @@ k8s_yaml(kustomize('~/svc/demo-db-api-manifests/overlays/dev'))
 
 # 2. 작업 중인 서비스: hot reload
 docker_build_with_restart(
-    'harbor.rebellions.ai/library/my-service',
+    'harbor.infra.rblnconnect.ai/library/my-service',
     '~/svc/my-service',
     entrypoint='./app',
     live_update=[
@@ -136,7 +136,7 @@ docker compose up
 
 ```bash
 # 코드를 dev 클러스터에서 직접 돌리기
-KUBECONFIG=~/.kube/config-dev skaffold dev --default-repo=harbor.rebellions.ai/library
+KUBECONFIG=~/.kube/config-dev skaffold dev --default-repo=harbor.infra.rblnconnect.ai/library
 ```
 
 ## 디버깅
