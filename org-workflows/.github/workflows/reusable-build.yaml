@@ -1,4 +1,4 @@
-# Reusable build workflow (Kaniko based — daemonless, ARC safe)
+# Reusable build workflow (모든 서비스 공용)
 #
 # 호출 예시 (모든 service repo 의 .github/workflows/ci.yml 에 1번):
 #
@@ -10,14 +10,15 @@
 #       with:
 #         service: my-service
 #         language: go              # go|node|python (정보용)
-#         registry: harbor.rebellions.ai
 #       secrets: inherit
 #
-# 산출물: SBOM(Syft) + Trivy(scan) + Cosign 서명 + Harbor push + dev manifest tag bump.
-# 빌드 엔진: Kaniko (rootless, daemonless) → Self-hosted ARC pod 에서 안전하게 동작.
+# 산출물: 이미지 build/push + SBOM(Syft) + Trivy(scan) + Cosign 서명 + dev manifest tag bump.
+# 빌드 엔진: docker buildx on rbcn VM runner (`[self-hosted, rbcn]`).
+#   - rbcn-ci-runner-01 에는 docker daemon 이 있어서 buildx 사용 가능 (캐시 친화적).
+#   - 가벼운 후속 job (manifest bump) 은 ARC `[self-hosted, rebel-k8s-runner]` 사용.
 # 조직에서 이 workflow 를 한번 수정하면 모든 service repo 가 즉시 반영됨 (drift 0).
 
-name: Reusable Build (Kaniko)
+name: Reusable Build (docker buildx)
 
 on:
   workflow_call:
@@ -49,7 +50,12 @@ on:
         type: string
         default: "."
       runs-on:
-        description: "JSON array of labels"
+        description: "JSON array of labels (build job 은 기본 rbcn VM runner: docker 사용 가능)"
+        required: false
+        type: string
+        default: '["self-hosted","rbcn"]'
+      bump_runs_on:
+        description: "manifest bump job 용 runner (lightweight; ARC default)"
         required: false
         type: string
         default: '["self-hosted","rebel-k8s-runner"]'
@@ -97,7 +103,7 @@ jobs:
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       image: ${{ steps.meta.outputs.image }}
-      digest: ${{ steps.kaniko.outputs.digest }}
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -115,7 +121,15 @@ jobs:
           echo "tag=$TAG"   >> "$GITHUB_OUTPUT"
           echo "image=$IMG" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare Harbor auth
+      - name: Verify docker available
+        shell: bash
+        run: |
+          set -e
+          docker version
+          docker buildx version || docker buildx install || true
+          docker buildx version
+
+      - name: Login to Harbor
         shell: bash
         env:
           REG:  ${{ inputs.registry }}
@@ -123,15 +137,10 @@ jobs:
           PASS: ${{ secrets.HARBOR_PASS }}
         run: |
           set -e
-          mkdir -p $HOME/.docker
-          AUTH=$(printf "%s:%s" "$USER" "$PASS" | base64 -w0)
-          cat > $HOME/.docker/config.json <<EOF
-          { "auths": { "$REG": { "auth": "$AUTH" } } }
-          EOF
-          chmod 600 $HOME/.docker/config.json
+          echo "$PASS" | docker login "$REG" -u "$USER" --password-stdin
 
-      - name: Build & push (Kaniko)
-        id: kaniko
+      - name: Build & push (docker buildx)
+        id: build
         shell: bash
         env:
           IMAGE: ${{ steps.meta.outputs.image }}
@@ -142,71 +151,40 @@ jobs:
           SVC: ${{ inputs.service }}
         run: |
           set -e
-          # Kaniko executor 를 standalone container 로 실행 (daemon 없이)
-          # ARC runner pod 안에서 nerdctl / podman / containerd 가 있을 수 있으므로
-          # 그게 없으면 로컬 binary 다운로드 fallback.
-          if command -v nerdctl >/dev/null 2>&1; then ENG=nerdctl
-          elif command -v podman >/dev/null 2>&1; then ENG=podman
-          else ENG=""
-          fi
+          # buildx builder 가 없으면 만들어 둠 (한번만, idempotent)
+          docker buildx create --name rbcn-builder --use 2>/dev/null || \
+            docker buildx use rbcn-builder
 
-          if [ -n "$ENG" ]; then
-            $ENG run --rm \
-              -v "$PWD:/workspace" \
-              -v "$HOME/.docker/config.json:/kaniko/.docker/config.json:ro" \
-              gcr.io/kaniko-project/executor:v1.23.2 \
-              --dockerfile=/workspace/$DOCKERFILE \
-              --context=/workspace/$CONTEXT \
-              --destination=$IMAGE \
-              --cache=true \
-              --cache-repo=$REG/$PROJ/$SVC-cache \
-              --snapshot-mode=redo \
-              --use-new-run \
-              --image-name-with-digest-file=/workspace/.image.digest
-          else
-            # binary fallback: kaniko executor binary를 임시 다운로드
-            mkdir -p /tmp/kaniko-bin
-            curl -sL https://github.com/chainguard-dev/kaniko/releases/download/v1.23.2/executor-linux-amd64 \
-              -o /tmp/kaniko-bin/executor || \
-              curl -sL https://storage.googleapis.com/kaniko-release/v1.23.2/executor-linux-amd64 \
-              -o /tmp/kaniko-bin/executor
-            chmod +x /tmp/kaniko-bin/executor
-            mkdir -p /kaniko/.docker || true
-            cp $HOME/.docker/config.json /kaniko/.docker/config.json 2>/dev/null || sudo cp $HOME/.docker/config.json /kaniko/.docker/config.json
-            /tmp/kaniko-bin/executor \
-              --dockerfile=$DOCKERFILE \
-              --context=$PWD/$CONTEXT \
-              --destination=$IMAGE \
-              --cache=true \
-              --cache-repo=$REG/$PROJ/$SVC-cache \
-              --snapshot-mode=redo \
-              --image-name-with-digest-file=$PWD/.image.digest
-          fi
+          # registry 캐시 (cache-from / cache-to) → 점진적 빌드 가속
+          # metadata-file 로 digest 추출
+          mkdir -p .build
+          docker buildx build \
+            --file "$DOCKERFILE" \
+            --tag "$IMAGE" \
+            --cache-from "type=registry,ref=$REG/$PROJ/$SVC-cache:buildcache" \
+            --cache-to   "type=registry,ref=$REG/$PROJ/$SVC-cache:buildcache,mode=max" \
+            --metadata-file .build/metadata.json \
+            --push \
+            "$CONTEXT"
 
-          DIGEST=$(awk -F@ '{print $2}' .image.digest 2>/dev/null || echo "")
+          DIGEST=$(python3 -c "import json,sys; d=json.load(open('.build/metadata.json')); print(d.get('containerimage.digest',''))")
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
           echo "Built: $IMAGE  digest=$DIGEST"
 
-      - name: Install crane (image inspect)
-        if: inputs.sbom || inputs.scan || inputs.sign
-        shell: bash
-        run: |
-          set -e
-          mkdir -p $HOME/.local/bin
-          curl -sL https://github.com/google/go-containerregistry/releases/latest/download/go-containerregistry_Linux_x86_64.tar.gz \
-            | tar -xz -C $HOME/.local/bin crane
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: SBOM (Syft)
+      - name: SBOM (Syft) + upload
         if: inputs.sbom
         shell: bash
         env:
           IMAGE: ${{ steps.meta.outputs.image }}
         run: |
           set -e
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
-            | sh -s -- -b $HOME/.local/bin v1.18.1
-          syft "$IMAGE" -o spdx-json > sbom-${{ inputs.service }}-${{ steps.meta.outputs.tag }}.spdx.json
+          mkdir -p $HOME/.local/bin
+          if ! command -v syft >/dev/null 2>&1; then
+            curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+              | sh -s -- -b $HOME/.local/bin v1.18.1
+            export PATH="$HOME/.local/bin:$PATH"
+          fi
+          syft "$IMAGE" -o spdx-json > "sbom-${{ inputs.service }}-${{ steps.meta.outputs.tag }}.spdx.json"
           echo "SBOM size: $(wc -c < sbom-${{ inputs.service }}-${{ steps.meta.outputs.tag }}.spdx.json) bytes"
 
       - name: Upload SBOM artifact
@@ -225,8 +203,12 @@ jobs:
           SEV:   ${{ inputs.severity_fail }}
         run: |
           set -e
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b $HOME/.local/bin v0.55.2
+          mkdir -p $HOME/.local/bin
+          if ! command -v trivy >/dev/null 2>&1; then
+            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+              | sh -s -- -b $HOME/.local/bin v0.55.2
+            export PATH="$HOME/.local/bin:$PATH"
+          fi
           trivy image \
             --severity "$SEV" \
             --exit-code 1 \
@@ -243,7 +225,7 @@ jobs:
         shell: bash
         env:
           IMAGE: ${{ steps.meta.outputs.image }}
-          DIGEST: ${{ steps.kaniko.outputs.digest }}
+          DIGEST: ${{ steps.build.outputs.digest }}
           COSIGN_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         run: |
@@ -255,7 +237,6 @@ jobs:
             cosign sign --key /tmp/cosign.key -y "$REF"
             rm -f /tmp/cosign.key
           else
-            # OIDC 키리스 (id-token 권한 필요)
             cosign sign -y --identity-token "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$REF" || \
               echo "::warning::cosign keyless 실패 - COSIGN_PRIVATE_KEY 미설정 + OIDC 환경 미가용"
           fi
@@ -263,7 +244,7 @@ jobs:
   bump-dev-manifest:
     needs: build
     if: inputs.bump_dev && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
-    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    runs-on: ${{ fromJSON(inputs.bump_runs_on) }}
     steps:
       - name: Checkout manifests
         uses: actions/checkout@v4
