@@ -30,9 +30,10 @@
 - Keycloak (OIDC auth)
 
 ## Runbooks
-- [Deploy 절차](../runbooks/RUN-04.md)
-- [Rollback](../runbooks/RUN-04.md#rollback)
-- [Scale up/down](../runbooks/RUN-13.md)
+- [Platform SOT - 배포](../PLATFORM.md#22-배포-deploy) — `rbcn promote demo-nextjs dev stage`
+- [Platform SOT - 롤백](../PLATFORM.md#22-배포-deploy) — `rbcn rollback demo-nextjs`
+- [K8s Control Plane Runbook](../runbooks/k8s-cp.md) — 일반 K8s 작업
+- [DR Runbook](../dr/INDEX.md) — 장애 복구
 
 ## Related Incidents
 - (현재까지 0건)

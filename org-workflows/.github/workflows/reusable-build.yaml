@@ -1,0 +1,308 @@
+# Reusable build workflow (Kaniko based — daemonless, ARC safe)
+#
+# 호출 예시 (모든 service repo 의 .github/workflows/ci.yml 에 1번):
+#
+#   name: ci
+#   on: [push, pull_request]
+#   jobs:
+#     build:
+#       uses: rebellions-sw/.github/.github/workflows/reusable-build.yaml@main
+#       with:
+#         service: my-service
+#         language: go              # go|node|python (정보용)
+#         registry: harbor.rebellions.ai
+#       secrets: inherit
+#
+# 산출물: SBOM(Syft) + Trivy(scan) + Cosign 서명 + Harbor push + dev manifest tag bump.
+# 빌드 엔진: Kaniko (rootless, daemonless) → Self-hosted ARC pod 에서 안전하게 동작.
+# 조직에서 이 workflow 를 한번 수정하면 모든 service repo 가 즉시 반영됨 (drift 0).
+
+name: Reusable Build (Kaniko)
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: "Service name (also image name)"
+        required: true
+        type: string
+      language:
+        description: "go | node | python (informational)"
+        required: false
+        type: string
+        default: "go"
+      registry:
+        required: false
+        type: string
+        default: "harbor.rebellions.ai"
+      registry_project:
+        description: "Harbor project (image path = registry/project/service)"
+        required: false
+        type: string
+        default: "library"
+      dockerfile:
+        required: false
+        type: string
+        default: "Dockerfile"
+      context:
+        required: false
+        type: string
+        default: "."
+      runs-on:
+        description: "JSON array of labels"
+        required: false
+        type: string
+        default: '["self-hosted","rebel-k8s-runner"]'
+      bump_dev:
+        description: "Auto-bump manifest dev overlay tag"
+        required: false
+        type: boolean
+        default: true
+      sign:
+        required: false
+        type: boolean
+        default: true
+      sbom:
+        required: false
+        type: boolean
+        default: true
+      scan:
+        required: false
+        type: boolean
+        default: true
+      severity_fail:
+        required: false
+        type: string
+        default: "CRITICAL,HIGH"
+    secrets:
+      HARBOR_USER:
+        required: true
+      HARBOR_PASS:
+        required: true
+      COSIGN_PRIVATE_KEY:
+        required: false
+      COSIGN_PASSWORD:
+        required: false
+      MANIFESTS_PAT:
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      image: ${{ steps.meta.outputs.image }}
+      digest: ${{ steps.kaniko.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute tag (semver-or-sha)
+        id: meta
+        shell: bash
+        run: |
+          set -e
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF##refs/tags/}"
+          else
+            TAG="$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}.${GITHUB_SHA::7}"
+          fi
+          IMG="${{ inputs.registry }}/${{ inputs.registry_project }}/${{ inputs.service }}:$TAG"
+          echo "tag=$TAG"   >> "$GITHUB_OUTPUT"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare Harbor auth
+        shell: bash
+        env:
+          REG:  ${{ inputs.registry }}
+          USER: ${{ secrets.HARBOR_USER }}
+          PASS: ${{ secrets.HARBOR_PASS }}
+        run: |
+          set -e
+          mkdir -p $HOME/.docker
+          AUTH=$(printf "%s:%s" "$USER" "$PASS" | base64 -w0)
+          cat > $HOME/.docker/config.json <<EOF
+          { "auths": { "$REG": { "auth": "$AUTH" } } }
+          EOF
+          chmod 600 $HOME/.docker/config.json
+
+      - name: Build & push (Kaniko)
+        id: kaniko
+        shell: bash
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          CONTEXT: ${{ inputs.context }}
+          REG: ${{ inputs.registry }}
+          PROJ: ${{ inputs.registry_project }}
+          SVC: ${{ inputs.service }}
+        run: |
+          set -e
+          # Kaniko executor 를 standalone container 로 실행 (daemon 없이)
+          # ARC runner pod 안에서 nerdctl / podman / containerd 가 있을 수 있으므로
+          # 그게 없으면 로컬 binary 다운로드 fallback.
+          if command -v nerdctl >/dev/null 2>&1; then ENG=nerdctl
+          elif command -v podman >/dev/null 2>&1; then ENG=podman
+          else ENG=""
+          fi
+
+          if [ -n "$ENG" ]; then
+            $ENG run --rm \
+              -v "$PWD:/workspace" \
+              -v "$HOME/.docker/config.json:/kaniko/.docker/config.json:ro" \
+              gcr.io/kaniko-project/executor:v1.23.2 \
+              --dockerfile=/workspace/$DOCKERFILE \
+              --context=/workspace/$CONTEXT \
+              --destination=$IMAGE \
+              --cache=true \
+              --cache-repo=$REG/$PROJ/$SVC-cache \
+              --snapshot-mode=redo \
+              --use-new-run \
+              --image-name-with-digest-file=/workspace/.image.digest
+          else
+            # binary fallback: kaniko executor binary를 임시 다운로드
+            mkdir -p /tmp/kaniko-bin
+            curl -sL https://github.com/chainguard-dev/kaniko/releases/download/v1.23.2/executor-linux-amd64 \
+              -o /tmp/kaniko-bin/executor || \
+              curl -sL https://storage.googleapis.com/kaniko-release/v1.23.2/executor-linux-amd64 \
+              -o /tmp/kaniko-bin/executor
+            chmod +x /tmp/kaniko-bin/executor
+            mkdir -p /kaniko/.docker || true
+            cp $HOME/.docker/config.json /kaniko/.docker/config.json 2>/dev/null || sudo cp $HOME/.docker/config.json /kaniko/.docker/config.json
+            /tmp/kaniko-bin/executor \
+              --dockerfile=$DOCKERFILE \
+              --context=$PWD/$CONTEXT \
+              --destination=$IMAGE \
+              --cache=true \
+              --cache-repo=$REG/$PROJ/$SVC-cache \
+              --snapshot-mode=redo \
+              --image-name-with-digest-file=$PWD/.image.digest
+          fi
+
+          DIGEST=$(awk -F@ '{print $2}' .image.digest 2>/dev/null || echo "")
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Built: $IMAGE  digest=$DIGEST"
+
+      - name: Install crane (image inspect)
+        if: inputs.sbom || inputs.scan || inputs.sign
+        shell: bash
+        run: |
+          set -e
+          mkdir -p $HOME/.local/bin
+          curl -sL https://github.com/google/go-containerregistry/releases/latest/download/go-containerregistry_Linux_x86_64.tar.gz \
+            | tar -xz -C $HOME/.local/bin crane
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: SBOM (Syft)
+        if: inputs.sbom
+        shell: bash
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+        run: |
+          set -e
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b $HOME/.local/bin v1.18.1
+          syft "$IMAGE" -o spdx-json > sbom-${{ inputs.service }}-${{ steps.meta.outputs.tag }}.spdx.json
+          echo "SBOM size: $(wc -c < sbom-${{ inputs.service }}-${{ steps.meta.outputs.tag }}.spdx.json) bytes"
+
+      - name: Upload SBOM artifact
+        if: inputs.sbom
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ inputs.service }}-${{ steps.meta.outputs.tag }}
+          path: sbom-${{ inputs.service }}-${{ steps.meta.outputs.tag }}.spdx.json
+          retention-days: 30
+
+      - name: Trivy scan
+        if: inputs.scan
+        shell: bash
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          SEV:   ${{ inputs.severity_fail }}
+        run: |
+          set -e
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b $HOME/.local/bin v0.55.2
+          trivy image \
+            --severity "$SEV" \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --no-progress \
+            "$IMAGE"
+
+      - name: Cosign install
+        if: inputs.sign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Cosign sign (keyless via OIDC, fallback key)
+        if: inputs.sign
+        shell: bash
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.kaniko.outputs.digest }}
+          COSIGN_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          set -e
+          REF="$IMAGE"
+          [ -n "$DIGEST" ] && REF="${IMAGE%:*}@$DIGEST"
+          if [ -n "$COSIGN_KEY" ]; then
+            echo "$COSIGN_KEY" > /tmp/cosign.key
+            cosign sign --key /tmp/cosign.key -y "$REF"
+            rm -f /tmp/cosign.key
+          else
+            # OIDC 키리스 (id-token 권한 필요)
+            cosign sign -y --identity-token "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$REF" || \
+              echo "::warning::cosign keyless 실패 - COSIGN_PRIVATE_KEY 미설정 + OIDC 환경 미가용"
+          fi
+
+  bump-dev-manifest:
+    needs: build
+    if: inputs.bump_dev && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    steps:
+      - name: Checkout manifests
+        uses: actions/checkout@v4
+        with:
+          repository: rebellions-sw/${{ inputs.service }}-manifests
+          ref: dev
+          token: ${{ secrets.MANIFESTS_PAT }}
+          path: m
+
+      - name: Install yq
+        shell: bash
+        run: |
+          set -e
+          mkdir -p $HOME/.local/bin
+          curl -sL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
+            -o $HOME/.local/bin/yq
+          chmod +x $HOME/.local/bin/yq
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Bump dev image tag
+        shell: bash
+        env:
+          REG:  ${{ inputs.registry }}
+          PROJ: ${{ inputs.registry_project }}
+          SVC:  ${{ inputs.service }}
+          TAG:  ${{ needs.build.outputs.tag }}
+        run: |
+          set -e
+          cd m/overlays/dev
+          yq -i "(.images[] | select(.name == \"$REG/$PROJ/$SVC\").newTag) = \"$TAG\"" kustomization.yaml
+          cat kustomization.yaml
+
+      - name: Commit & push
+        shell: bash
+        run: |
+          set -e
+          cd m
+          git config user.email "rbcn-ci@rebellions.ai"
+          git config user.name  "rbcn-ci"
+          git add -A
+          git commit -m "chore(dev): bump ${{ inputs.service }} → ${{ needs.build.outputs.tag }}" || exit 0
+          git push

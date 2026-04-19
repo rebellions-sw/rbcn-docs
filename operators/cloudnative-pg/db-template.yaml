@@ -1,0 +1,83 @@
+# PostgreSQL Cluster (CloudNative-PG)
+#
+# 1장 CR = HA Postgres 3 instance + WAL backup + PITR + cert + monitoring.
+#
+# 사용:
+#   1) name 변경
+#   2) namespace 변경 (서비스와 동일 namespace 권장)
+#   3) backup MinIO bucket 변경
+#   4) kubectl apply -f
+#   5) kubectl get cluster -n <ns>
+#   6) connection string: postgres://postgres@<name>-rw.<ns>.svc:5432/<db>
+#      pw: kubectl -n <ns> get secret <name>-app -o jsonpath='{.data.password}' | base64 -d
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: my-db                       # CHANGE ME
+  namespace: my-svc                 # CHANGE ME
+  labels:
+    owner: platform                 # CHANGE ME
+    tier: T1
+spec:
+  instances: 3                      # HA: 1 primary + 2 standby
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.3
+  postgresUID: 26
+  postgresGID: 26
+
+  bootstrap:
+    initdb:
+      database: app                 # 초기 DB 이름
+      owner: app                    # 자동 생성될 user
+      secret:
+        name: my-db-app             # password 자동 생성
+
+  storage:
+    storageClass: local-path        # 운영은 ceph/longhorn 권장
+    size: 10Gi
+
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits:   { cpu: "2",  memory: 4Gi }
+
+  monitoring:
+    enablePodMonitor: true          # Prometheus 자동 스크래프
+
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: "256MB"
+      log_min_duration_statement: "500"
+
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://rbcn-pg-backups/my-db   # CHANGE ME
+      endpointURL: http://minio.minio.svc:9000
+      s3Credentials:
+        accessKeyId:
+          name: minio-credentials
+          key: AWS_ACCESS_KEY_ID
+        secretAccessKey:
+          name: minio-credentials
+          key: AWS_SECRET_ACCESS_KEY
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+    retentionPolicy: "30d"
+
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+---
+# Optional: Scheduled backup (매일 02:00)
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: my-db-daily
+  namespace: my-svc
+spec:
+  cluster:
+    name: my-db
+  schedule: "0 0 2 * * *"
+  backupOwnerReference: self

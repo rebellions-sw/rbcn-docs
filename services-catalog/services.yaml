@@ -1,0 +1,38 @@
+# Rebellions Service Catalog
+#
+# 새 서비스를 인프라에 등록하려면 이 파일에 1개 entry 만 추가하세요.
+# ArgoCD ApplicationSet 이 자동으로 dev/stage/prod 3 환경 Application 을 생성합니다.
+#
+# Schema:
+#   name:        서비스 이름 (k8s namespace + Application prefix 로 사용)
+#   type:        api | web | mfe | worker | db
+#   owner:       팀 (CODEOWNERS 와 일치)
+#   tier:        T0 (critical) | T1 (important) | T2 (best-effort)
+#   repo:        manifests repo (https URL, 끝에 .git 포함)
+#   environments:  배포할 환경 [dev, stage, prod]
+#   path:        repo 내 overlay path 패턴 (default: overlays/{env})
+#
+# 예시: 1줄 등록 후 PR → merge 하면 ArgoCD 가 자동 onboard
+# ----------------------------------------------------------------------
+
+services:
+  - name: demo-nextjs
+    type: web
+    owner: platform
+    tier: T1
+    repo: https://github.com/rebellions-sw/rbcn-demo-nextjs-manifests.git
+    environments: [dev, stage, prod]
+
+  - name: demo-api
+    type: api
+    owner: platform
+    tier: T1
+    repo: https://github.com/rebellions-sw/rbcn-demo-api-manifests.git
+    environments: [dev]
+
+  - name: demo-db-api
+    type: api
+    owner: platform
+    tier: T1
+    repo: https://github.com/rebellions-sw/rbcn-demo-db-api-manifests.git
+    environments: [dev]

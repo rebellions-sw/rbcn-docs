@@ -1,0 +1,13 @@
+# Owners are auto-requested for review on all PRs.
+# Last matching pattern wins.
+
+* @rebellions-sw/platform
+
+# 코드/빌드/배포
+/Dockerfile          @rebellions-sw/platform
+/.github/            @rebellions-sw/platform
+/Makefile            @rebellions-sw/platform
+
+# 보안 관련
+/SECURITY.md         @rebellions-sw/security
+/.cosign.pub         @rebellions-sw/security

@@ -1,0 +1,24 @@
+# Tiltfile 예시 — 여러 서비스 동시 개발
+# 사용: tilt up
+
+load('ext://restart_process', 'docker_build_with_restart')
+
+# 의존 서비스 (불변)
+k8s_yaml(kustomize('../demo-postgres-manifests/overlays/dev'))
+k8s_yaml(kustomize('../demo-db-api-manifests/overlays/dev'))
+
+# 작업 중 서비스 (hot reload)
+docker_build_with_restart(
+    'harbor.rebellions.ai/library/my-service',
+    '.',
+    entrypoint='./app',
+    live_update=[
+        sync('.', '/src'),
+        run('cd /src && go build -o /app .'),
+    ],
+)
+k8s_yaml(kustomize('overlays/dev'))
+
+# UI 표시
+k8s_resource('my-service', port_forwards=8080)
+k8s_resource('demo-db-api', port_forwards=8081)

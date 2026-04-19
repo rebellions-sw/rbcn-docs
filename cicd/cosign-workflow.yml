@@ -1,0 +1,48 @@
+name: Build + Sign + Push
+on:
+  push:
+    branches: [main]
+jobs:
+  build-sign:
+    runs-on: [self-hosted, rebel-k8s-runner]
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Fetch Cosign key from Vault
+        env:
+          VAULT_ADDR: https://vault.infra.rblnconnect.ai
+          VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
+        run: |
+          vault kv get -field=private_key secret/cosign/signing > cosign.key
+          echo "${{ secrets.COSIGN_PASSWORD }}" > cosign.password
+      
+      - name: Build image
+        run: |
+          docker build -t harbor.infra.rblnconnect.ai/demo/app:${{ github.sha }} .
+          docker tag harbor.infra.rblnconnect.ai/demo/app:${{ github.sha }} \
+                     harbor.infra.rblnconnect.ai/demo/app:latest
+      
+      - name: Harbor login
+        run: |
+          echo "${{ secrets.HARBOR_PASSWORD }}" | docker login harbor.infra.rblnconnect.ai -u admin --password-stdin
+      
+      - name: Push
+        run: |
+          docker push harbor.infra.rblnconnect.ai/demo/app:${{ github.sha }}
+          docker push harbor.infra.rblnconnect.ai/demo/app:latest
+      
+      - name: Sign with Cosign
+        env:
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          cosign sign --key cosign.key --yes \
+            harbor.infra.rblnconnect.ai/demo/app:${{ github.sha }}
+      
+      - name: Verify signature
+        run: |
+          vault kv get -field=public_key secret/cosign/signing > cosign.pub
+          cosign verify --key cosign.pub \
+            harbor.infra.rblnconnect.ai/demo/app:${{ github.sha }}

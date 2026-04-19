@@ -1,0 +1,58 @@
+site_name: RBCN Infra Docs
+site_description: Reference documentation for RBCN infrastructure
+site_url: https://docs.infra.rblnconnect.ai
+docs_dir: .
+site_dir: /var/www/rbcn-docs
+exclude_docs: |
+  .mkdocs/
+  .git/
+  .gitignore
+  mkdocs.yml
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle: { icon: material/brightness-7, name: Switch to dark mode }
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle: { icon: material/brightness-4, name: Switch to light mode }
+
+markdown_extensions:
+  - admonition
+  - codehilite
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+nav:
+  - Home: README.md
+  - Onboarding: dev-onboarding.md
+  - Services:
+      - Index: services/INDEX.md
+  - Runbooks:
+      - Index: runbooks/INDEX.md
+  - Incidents:
+      - Index: incidents/INDEX.md
+  - Cost Reports:
+      - Index: cost-reports/INDEX.md
+  - Change Requests:
+      - Index: change-requests/CR-2026-04-19-001.md

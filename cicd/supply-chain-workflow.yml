@@ -1,0 +1,152 @@
+# .github/workflows/supply-chain.yml
+# SLSA Level 3 + SBOM + Provenance + Trivy Gate
+name: Supply Chain Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  id-token: write    # for keyless signing (OIDC)
+  contents: read
+  packages: write
+  attestations: write
+  security-events: write
+
+env:
+  REGISTRY: harbor.infra.rblnconnect.ai
+  IMAGE: ${{ github.repository }}
+
+jobs:
+  # ════════════════════════════════════════════════════════════
+  # 1. Build with provenance (SLSA L3)
+  # ════════════════════════════════════════════════════════════
+  build:
+    runs-on: [self-hosted, rebel-k8s-runner]
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Harbor
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.HARBOR_USER }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      - name: Build + Push image with SLSA provenance
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}
+          provenance: mode=max     # SLSA L3
+          sbom: true               # auto SBOM
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ════════════════════════════════════════════════════════════
+  # 2. SBOM 생성 (SPDX + CycloneDX)
+  # ════════════════════════════════════════════════════════════
+  sbom:
+    needs: build
+    runs-on: [self-hosted, rebel-k8s-runner]
+    steps:
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sudo sh -s -- -b /usr/local/bin
+
+      - name: Generate SBOM (SPDX)
+        run: |
+          syft ${{ env.REGISTRY }}/${{ env.IMAGE }}@${{ needs.build.outputs.digest }} \
+               -o spdx-json=sbom.spdx.json \
+               -o cyclonedx-json=sbom.cdx.json
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: sbom.*.json
+
+      - name: Attach SBOM to image as attestation
+        env:
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          vault kv get -field=private_key secret/cosign/signing > cosign.key
+          cosign attest --key cosign.key --predicate sbom.spdx.json \
+            --type spdxjson --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}@${{ needs.build.outputs.digest }}
+
+  # ════════════════════════════════════════════════════════════
+  # 3. Trivy 취약점 게이트 (HIGH 이상 → fail)
+  # ════════════════════════════════════════════════════════════
+  vuln-gate:
+    needs: build
+    runs-on: [self-hosted, rebel-k8s-runner]
+    steps:
+      - name: Trivy scan (gate on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE }}@${{ needs.build.outputs.digest }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: 1                # gate
+
+      - name: Upload Trivy results to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+  # ════════════════════════════════════════════════════════════
+  # 4. Cosign signing (after gates pass)
+  # ════════════════════════════════════════════════════════════
+  sign:
+    needs: [build, sbom, vuln-gate]
+    runs-on: [self-hosted, rebel-k8s-runner]
+    steps:
+      - name: Sign image with Cosign
+        env:
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          vault kv get -field=private_key secret/cosign/signing > cosign.key
+          cosign sign --key cosign.key --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}@${{ needs.build.outputs.digest }}
+
+      - name: Verify signature
+        run: |
+          vault kv get -field=public_key secret/cosign/signing > cosign.pub
+          cosign verify --key cosign.pub \
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}@${{ needs.build.outputs.digest }}
+
+      - name: Generate SLSA provenance attestation
+        env:
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          cat > provenance.json <<EOF
+          {
+            "buildType": "https://github.com/actions/runner",
+            "builder": { "id": "https://github.com/actions/runner@v2" },
+            "invocation": {
+              "configSource": {
+                "uri": "git+${{ github.repositoryUrl }}",
+                "digest": { "sha1": "${{ github.sha }}" },
+                "entryPoint": ".github/workflows/supply-chain.yml"
+              }
+            },
+            "metadata": {
+              "buildStartedOn": "$(date -u -Iseconds)",
+              "completeness": { "parameters": true, "environment": false, "materials": true },
+              "reproducible": false
+            }
+          }
+          EOF
+          cosign attest --key cosign.key --predicate provenance.json \
+            --type slsaprovenance --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}@${{ needs.build.outputs.digest }}

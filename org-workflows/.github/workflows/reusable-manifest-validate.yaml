@@ -1,0 +1,74 @@
+# Reusable manifest validation
+#
+# manifests repo 의 PR 마다 호출 → kustomize build + kubeconform + conftest.
+#
+# 호출 예:
+#   name: validate
+#   on: [pull_request]
+#   jobs:
+#     validate:
+#       uses: rebellions-sw/.github/.github/workflows/reusable-manifest-validate.yaml@main
+#       secrets: inherit
+
+name: Reusable Manifest Validate
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: "JSON array of labels"
+        required: false
+        type: string
+        default: '["self-hosted","rebel-k8s-runner"]'
+      kustomize_paths:
+        description: "Whitespace-separated overlay paths"
+        required: false
+        type: string
+        default: "overlays/dev overlays/stage overlays/prod"
+      conftest_policy_repo:
+        required: false
+        type: string
+        default: "https://github.com/rebellions-sw/conftest-policies.git//policies"
+
+jobs:
+  validate:
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools (user-local, no sudo)
+        shell: bash
+        run: |
+          set -e
+          mkdir -p $HOME/.local/bin
+          BIN=$HOME/.local/bin
+
+          if ! command -v kustomize >/dev/null 2>&1; then
+            curl -sL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz \
+              | tar -xz -C $BIN kustomize
+          fi
+          if ! command -v kubeconform >/dev/null 2>&1; then
+            curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+              | tar -xz -C $BIN kubeconform
+          fi
+          if ! command -v conftest >/dev/null 2>&1; then
+            curl -sL https://github.com/open-policy-agent/conftest/releases/latest/download/conftest_Linux_x86_64.tar.gz \
+              | tar -xz -C $BIN conftest
+          fi
+          echo "$BIN" >> $GITHUB_PATH
+
+      - name: Build & validate each overlay
+        shell: bash
+        run: |
+          set -e
+          FAIL=0
+          for p in ${{ inputs.kustomize_paths }}; do
+            [ -d "$p" ] || { echo "skip $p (not present)"; continue; }
+            echo "::group::validate $p"
+            OUT=$(mktemp)
+            kustomize build "$p" > "$OUT"
+            kubeconform -strict -summary -ignore-missing-schemas "$OUT" || FAIL=1
+            conftest test --policy "${{ inputs.conftest_policy_repo }}" "$OUT" || true
+            echo "::endgroup::"
+          done
+          exit $FAIL

@@ -1,0 +1,77 @@
+# ApplicationSet — services 카탈로그를 읽어 dev/stage/prod Application 자동 생성
+#
+# 사용:
+#   1. services-catalog/services.yaml 에 1 entry 추가
+#   2. PR → merge
+#   3. ArgoCD 가 자동으로 환경별 Application 생성 (수동 작업 0)
+#
+# Cluster 매핑:
+#   - dev   → https://192.168.7.61:6443  (or in-cluster on hub)
+#   - stage → https://192.168.7.71:6443
+#   - prod  → https://192.168.7.81:6443
+
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: services
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+
+  generators:
+    # 1) services.yaml 의 모든 service 를 list 로 펼치고
+    # 2) environments 배열을 matrix 로 곱해서 (svc, env) 쌍 생성
+    - matrix:
+        generators:
+          - git:
+              repoURL: https://github.com/rebellions-sw/rbcn-docs.git
+              revision: main
+              files:
+                - path: "services-catalog/services.yaml"
+          - list:
+              elements:
+                - env: dev
+                  cluster: https://kubernetes.default.svc
+                  branch: dev
+                - env: stage
+                  cluster: https://kubernetes.default.svc
+                  branch: stage
+                - env: prod
+                  cluster: https://kubernetes.default.svc
+                  branch: prod
+
+  template:
+    metadata:
+      name: '{{.name}}-{{.env}}'
+      labels:
+        owner: '{{.owner}}'
+        tier: '{{.tier}}'
+        type: '{{.type}}'
+      annotations:
+        notifications.argoproj.io/subscribe.on-sync-failed.slack: rbcn-alerts
+    spec:
+      project: default
+      source:
+        repoURL: '{{.repo}}'
+        targetRevision: '{{.branch}}'
+        path: 'overlays/{{.env}}'
+      destination:
+        server: '{{.cluster}}'
+        namespace: '{{.name}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ApplyOutOfSyncOnly=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+  # 안전 장치: 서비스를 카탈로그에서 빼면 ArgoCD App 도 자동 삭제 (단, prune 정책 신중히)
+  syncPolicy:
+    preserveResourcesOnDeletion: false

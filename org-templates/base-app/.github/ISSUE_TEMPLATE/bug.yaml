@@ -1,0 +1,17 @@
+name: Bug report
+description: 동작 이상이나 에러
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: 무슨 문제인가
+      placeholder: 어떤 명령/요청이 어떻게 실패하는지
+    validations: { required: true }
+  - type: textarea
+    attributes: { label: 재현 단계 }
+  - type: textarea
+    attributes: { label: 기대 동작 }
+  - type: textarea
+    attributes: { label: 실제 동작 (로그/스크린샷) }
+  - type: input
+    attributes: { label: 환경, placeholder: "dev/stage/prod, 서비스 버전" }

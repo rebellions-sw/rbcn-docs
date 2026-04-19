@@ -1,0 +1,8 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ml-inference
+  namespace: <NS>
+spec:
+  minAvailable: 1
+  selector: { matchLabels: { app: ml-inference } }

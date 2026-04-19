@@ -1,0 +1,67 @@
+# ApplicationSet (List Generator 버전)
+#
+# Git repo 가 아직 없거나 빠르게 시작하려면 이 버전 사용.
+# inline list 로 services 정의 → 매번 ApplicationSet manifest 만 update.
+#
+# 운영 표준은 services-appset.yaml (Git generator) 권장.
+
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: services-list
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - name: demo-nextjs
+                  type: web
+                  owner: platform
+                  tier: T1
+                  repo: https://github.com/rebellions-sw/rbcn-demo-nextjs-manifests.git
+                - name: demo-api
+                  type: api
+                  owner: platform
+                  tier: T1
+                  repo: https://github.com/rebellions-sw/rbcn-demo-api-manifests.git
+                - name: demo-db-api
+                  type: api
+                  owner: platform
+                  tier: T1
+                  repo: https://github.com/rebellions-sw/rbcn-demo-db-api-manifests.git
+          - list:
+              elements:
+                - env: dev
+                  cluster: https://kubernetes.default.svc
+                  branch: dev
+
+  template:
+    metadata:
+      name: '{{.name}}-{{.env}}-listgen'
+      labels:
+        owner: '{{.owner}}'
+        tier: '{{.tier}}'
+        type: '{{.type}}'
+        managed-by: applicationset
+    spec:
+      project: default
+      source:
+        repoURL: '{{.repo}}'
+        targetRevision: '{{.branch}}'
+        path: 'overlays/{{.env}}'
+      destination:
+        server: '{{.cluster}}'
+        namespace: '{{.name}}'
+      syncPolicy:
+        automated:
+          prune: false
+          selfHeal: false
+        syncOptions:
+          - CreateNamespace=true
+        retry:
+          limit: 3

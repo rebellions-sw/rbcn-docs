@@ -1,0 +1,95 @@
+# Reusable promote workflow
+#
+# 매 manifests repo 의 .github/workflows/promote.yml 에서 호출:
+#
+#   name: promote
+#   on:
+#     workflow_dispatch:
+#       inputs:
+#         from: { type: choice, options: [dev, stage] }
+#         to:   { type: choice, options: [stage, prod] }
+#   jobs:
+#     promote:
+#       uses: rebellions-sw/.github/.github/workflows/reusable-promote.yaml@main
+#       with:
+#         from: ${{ inputs.from }}
+#         to:   ${{ inputs.to }}
+#       secrets: inherit
+#
+# 동작: from overlay 의 image tag 를 to overlay 로 복사 → PR 생성.
+
+name: Reusable Promote
+
+on:
+  workflow_call:
+    inputs:
+      from:
+        required: true
+        type: string
+      to:
+        required: true
+        type: string
+      runs-on:
+        description: "JSON array of labels"
+        required: false
+        type: string
+        default: '["self-hosted","rebel-k8s-runner"]'
+    secrets:
+      MANIFESTS_PAT:
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  promote:
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.to }}
+          fetch-depth: 0
+          token: ${{ secrets.MANIFESTS_PAT }}
+
+      - name: Install yq (user-local, no sudo)
+        shell: bash
+        run: |
+          set -e
+          mkdir -p $HOME/.local/bin
+          if ! command -v yq >/dev/null 2>&1; then
+            curl -sL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
+              -o $HOME/.local/bin/yq
+            chmod +x $HOME/.local/bin/yq
+          fi
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Copy tag from→to
+        id: copy
+        shell: bash
+        run: |
+          set -e
+          git fetch origin ${{ inputs.from }}
+          git checkout origin/${{ inputs.from }} -- overlays/${{ inputs.from }}/kustomization.yaml
+          mv overlays/${{ inputs.from }}/kustomization.yaml /tmp/from-kustomization.yaml
+          git checkout HEAD -- overlays/${{ inputs.from }}/kustomization.yaml || true
+          FROM_TAG=$(yq -r '.images[0].newTag' /tmp/from-kustomization.yaml)
+          echo "from_tag=$FROM_TAG" >> "$GITHUB_OUTPUT"
+          yq -i ".images[0].newTag = \"$FROM_TAG\"" overlays/${{ inputs.to }}/kustomization.yaml
+          cat overlays/${{ inputs.to }}/kustomization.yaml
+
+      - name: Create PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.MANIFESTS_PAT }}
+          branch: promote/${{ inputs.from }}-to-${{ inputs.to }}-${{ github.run_number }}
+          base: ${{ inputs.to }}
+          commit-message: "chore(promote): ${{ inputs.from }}→${{ inputs.to }} = ${{ steps.copy.outputs.from_tag }}"
+          title: "promote ${{ inputs.from }} → ${{ inputs.to }} = ${{ steps.copy.outputs.from_tag }}"
+          body: |
+            **Source**: `overlays/${{ inputs.from }}` (branch `${{ inputs.from }}`)
+            **Target**: `overlays/${{ inputs.to }}` (branch `${{ inputs.to }}`)
+            **Image tag**: `${{ steps.copy.outputs.from_tag }}`
+
+            CODEOWNERS 의 승인 후 머지하세요.
+            ArgoCD 가 자동 sync 합니다.
