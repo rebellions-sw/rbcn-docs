@@ -100,10 +100,10 @@ EOF
         cat > "$SVCDIR/go.mod" <<EOF
 module github.com/$ORG/$SVC
 
-go 1.22
+go 1.25
 EOF
         cat > "$SVCDIR/Dockerfile" <<'EOF'
-FROM golang:1.22-alpine AS build
+FROM golang:1.25-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 RUN go mod download
