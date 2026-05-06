@@ -1,0 +1,5 @@
+# Default owner for all files
+*       @rebel-sangmin
+
+# Override for specific paths
+# /docs/  @doc-team

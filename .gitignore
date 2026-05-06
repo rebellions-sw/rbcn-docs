@@ -1,0 +1,35 @@
+# Tooling
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfvars
+!*.tfvars.example
+.packer.d/
+*-cache/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Secrets (defense-in-depth, real secrets via Vault)
+*.pem
+!**/example.pem
+*.key
+!**/example.key
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+dist/
+build/
+node_modules/
+__pycache__/
+*.egg-info/
+.venv/
+
+# Logs
+*.log

@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rbcn-platform-root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/rebellions-sw/rbcn-k8s-platform
+    targetRevision: dev
+    path: applications
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
